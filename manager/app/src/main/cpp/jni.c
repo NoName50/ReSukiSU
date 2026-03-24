@@ -1,5 +1,6 @@
 #include "prelude.h"
 #include "ksu.h"
+#include "android_filesystem_config.h"
 
 #include <jni.h>
 #include <sys/prctl.h>
@@ -420,43 +421,33 @@ NativeBridgeNP(getManagersList, jobject) {
 }
 
 int fork_dont_care_and_exec_ksud(const char *path, bool is_coloros) {
-	int pid = fork();
-	if (pid < 0) {
-		PLOGE("fork");
-		return pid;
-	} else if (pid > 0) {
-		int status = 0;
-		if (TEMP_FAILURE_RETRY(waitpid(pid, &status, 0)) < 0) {
-			PLOGE("waitpid");
-			return -1;
+	if (setresuid(AID_ROOT, AID_ROOT, AID_ROOT)) {
+        PLOGE("setresuid");
+        return 1;
+    } else if (geteuid() == AID_ROOT) {
+        LOGI("We Are Root!!!");
+        if (setresgid(AID_ROOT, AID_ROOT, AID_ROOT)) {
+            PLOGE("setresgid");
+        }
+        gid_t groups[] = {AID_SYSTEM, AID_ADB, AID_LOG, AID_INPUT, AID_INET,
+                          AID_NET_BT, AID_NET_BT_ADMIN, AID_SDCARD_R, AID_SDCARD_RW,
+                          AID_NET_BW_STATS, AID_READPROC, AID_UHID, AID_EXT_DATA_RW,
+                          AID_EXT_OBB_RW, AID_READTRACEFS};
+        if (setgroups(sizeof(groups) / sizeof(groups[0]), groups)) {
+            PLOGE("setgroups");
+        }
+
+		if (is_coloros) {
+			LOGI("coloros detected, unload kernel module \"oplus_secure_guard\"");
+			execl("/system/bin/rmmod", "rmmod", "oplus_secure_guard", nullptr);
 		}
-		if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-			LOGE("magica bootstrap child failed, status=%d", status);
-		}
-		return pid;
-	}
 
-	if (setuid(0) != 0) {
-		PLOGE("setuid");
-		_exit(1);
-	}
-
-	pid = fork();
-	if (pid < 0) {
-		PLOGE("fork 2");
-		_exit(1);
-	} else if (pid > 0) {
-		_exit(0);
-	}
-
-	if (is_coloros) {
-		LOGI("coloros detected, unload kernel module \"oplus_secure_guard\"");
-		execl("/system/bin/rmmod", "rmmod", "oplus_secure_guard", nullptr);
-	}
-
-	execl(path, "ksud", "late-load", "--magica", "5555", nullptr);
-	PLOGE("exec magica");
-	_exit(1);
+		execl(path, "ksud", "late-load", "--magica", "5555", nullptr);
+		PLOGE("exec magica");
+        return 0;
+    } else {
+        return 1;
+    }
 }
 
 JNIEXPORT void JNICALL
