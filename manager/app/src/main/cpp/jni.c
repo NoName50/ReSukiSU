@@ -419,7 +419,7 @@ NativeBridgeNP(getManagersList, jobject) {
     return obj;
 }
 
-int fork_dont_care_and_exec_ksud(const char *path) {
+int fork_dont_care_and_exec_ksud(const char *path, bool is_coloros) {
 	int pid = fork();
 	if (pid < 0) {
 		PLOGE("fork");
@@ -449,6 +449,11 @@ int fork_dont_care_and_exec_ksud(const char *path) {
 		_exit(0);
 	}
 
+	if (is_coloros) {
+		LOGI("coloros detected, unload kernel module \"oplus_secure_guard\"");
+		execl("/system/bin/rmmod", "rmmod", "oplus_secure_guard", nullptr);
+	}
+
 	execl(path, "ksud", "late-load", "--magica", "5555", nullptr);
 	PLOGE("exec magica");
 	_exit(1);
@@ -457,9 +462,10 @@ int fork_dont_care_and_exec_ksud(const char *path) {
 JNIEXPORT void JNICALL
 Java_com_resukisu_resukisu_magica_AppZygotePreload_forkDontCareAndExecKsud(JNIEnv *env,
                                                                            jclass clazz,
-                                                                           jstring ksud_path) {
+                                                                           jstring ksud_path,
+                                                                           jboolean is_coloros) {
     const char *path = GetEnvironment()->GetStringUTFChars(env, ksud_path, nullptr);
     LOGD("executing magica %s", path);
-	fork_dont_care_and_exec_ksud(path);
+	fork_dont_care_and_exec_ksud(path, is_coloros == JNI_TRUE);
     GetEnvironment()->ReleaseStringUTFChars(env, ksud_path, path);
 }
