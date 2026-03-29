@@ -1,35 +1,46 @@
-kernelsu-objs := ksu.o
-kernelsu-objs += allowlist.o
-kernelsu-objs += dynamic_manager.o
-kernelsu-objs += app_profile.o
-kernelsu-objs += apk_sign.o
-kernelsu-objs += sucompat.o
+kernelsu-objs := core/init.o
+kernelsu-objs += policy/allowlist.o
+kernelsu-objs += policy/app_profile.o
+kernelsu-objs += policy/feature.o
+kernelsu-objs += feature/sucompat.o
+kernelsu-objs += feature/kernel_umount.o
+kernelsu-objs += feature/sulog.o
+kernelsu-objs += hook/setuid_hook.o
 
-kernelsu-objs += throne_tracker.o
-kernelsu-objs += pkg_observer.o
-kernelsu-objs += setuid_hook.o
+ifndef CONFIG_KSU_DISABLE_MANAGER
+kernelsu-objs += feature/dynamic_manager.o
+kernelsu-objs += manager/apk_sign.o
+kernelsu-objs += manager/pkg_observer.o
+kernelsu-objs += manager/throne_tracker.o
+kernelsu-objs += manager/manager.o
+endif
 
 ifeq ($(CONFIG_KSU_MANUAL_HOOK), y)
 ifeq ($(shell test $(VERSION) -lt 6 || { test $(VERSION) -eq 6 && test $(PATCHLEVEL) -lt 8; } && echo y),y)
-kernelsu-objs += lsm_hooks.o
+kernelsu-objs += hook/lsm_hooks.o
 endif
 endif
 
-kernelsu-objs += kernel_compat.o
-kernelsu-objs += kernel_umount.o
-kernelsu-objs += supercalls.o
-kernelsu-objs += su_mount_ns.o
-kernelsu-objs += feature.o
-kernelsu-objs += throne_tracker.o
-kernelsu-objs += ksud.o
-kernelsu-objs += seccomp_cache.o
-kernelsu-objs += file_wrapper.o
-kernelsu-objs += sulog.o
-kernelsu-objs += manager.o
+kernelsu-objs += compat/kernel_compat.o
+kernelsu-objs += infra/su_mount_ns.o
+kernelsu-objs += infra/seccomp_cache.o
+kernelsu-objs += infra/file_wrapper.o
+kernelsu-objs += runtime/boot_event.o
+kernelsu-objs += runtime/ksud_integration.o
 
 kernelsu-objs += selinux/selinux.o
 kernelsu-objs += selinux/sepolicy.o
 kernelsu-objs += selinux/rules.o
+
+kernelsu-objs += supercall/dispatch.o
+kernelsu-objs += supercall/perm.o
+kernelsu-objs += supercall/supercall.o
+
+ifeq ($(CONFIG_KPM), y)
+kernelsu-objs += kpm/kpm.o
+kernelsu-objs += kpm/compact.o
+kernelsu-objs += kpm/super_access.o
+endif
 
 ccflags-y += -Wno-implicit-function-declaration -Wno-strict-prototypes 
 ccflags-y += $(call cc-disable-warning, int-conversion)
@@ -38,10 +49,10 @@ ccflags-y += -Wno-int-to-pointer-cast -Wno-declaration-after-statement
 
 ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
 ccflags-y += -I$(objtree)/security/selinux -include $(srctree)/include/uapi/asm-generic/errno.h
+ccflags-y += -I$(srctree)/$(src) -I$(srctree)/$(src)/include
+ccflags-y += -I$(src) -I$(src)/include
 
 obj-$(CONFIG_KSU) += kernelsu.o
-
-obj-$(CONFIG_KPM) += kpm/
 
 REPO_NAME := ReSukiSU
 
@@ -116,6 +127,19 @@ endif
 $(info -- KERNEL_VERSION: $(KERNEL_VERSION))
 $(info -- KERNEL_TYPE: $(KERNEL_TYPE))
 
+ifeq ($(CONFIG_KSU),y)
+  ifneq ($(KERNEL_TYPE), GKI 2.0)
+      ifeq ($(KSU_TP_HOOK), y)
+          $(info -- $(REPO_NAME) TP Hooks are only supported on GKI 2.0 kernels.)
+          $(info -- Current Kernel Type: $(KERNEL_TYPE))
+          $(info -- If you really want to continue, go to Kbuild and comment out this warning.)
+          $(info -- Usually, this error occurs because you forgot to enable some kernel configurations.)
+          $(info -- Read: https://resukisu.github.io/guide/manual-integrate.html)
+          $(error TP hooks are incompatible with Non-GKI/GKI 1.0 kernels in this configuration.)
+      endif
+  endif
+endif
+
 # Check if KPM is enabled
 ifeq ($(CONFIG_KPM), y)
 $(info -- KPM is enabled)
@@ -125,8 +149,24 @@ $(info -- KPM is disabled)
 endif
 
 ifeq ($(KSU_TP_HOOK), y)
-kernelsu-objs += syscall_hook_manager.o
-kernelsu-objs += util.o
+kernelsu-objs += infra/symbol_resolver.o
+kernelsu-objs += hook/lsm_hook_magic.o
+kernelsu-objs += hook/syscall_hook_manager.o
+kernelsu-objs += hook/syscall_event_bridge.o
+kernelsu-objs += hook/tp_marker.o
+ifeq ($(CONFIG_ARM64),y)
+kernelsu-objs += hook/arm64/patch_memory.o
+kernelsu-objs += hook/arm64/syscall_hook.o
+else ifeq ($(CONFIG_X86_64),y)
+kernelsu-objs += hook/x86_64/patch_memory.o
+kernelsu-objs += hook/x86_64/syscall_hook.o
+else
+ifeq ($(CONFIG_KSU), y)
+$(info -- Unsupported arch)
+$(info -- Only arm64-v8a and x86-64 support for tracepoint hook)
+$(error Unsupported arch for tracepoint hook)
+endif
+endif
 endif
 
 # SELinux drivers check
@@ -205,6 +245,11 @@ endif
 ifeq ($(shell grep -q "static inline struct inode \*file_inode" $(srctree)/include/linux/fs.h; echo $$?),0)
 $(info -- $(REPO_NAME)/compat: file_inode() found)
 ccflags-y += -DKSU_UL_HAS_FILE_INODE
+endif
+
+ifneq ($(shell grep -q __flush_dcache_area $(srctree)/arch/arm64/include/asm/cacheflush.h; echo $$?),0)
+$(info -- $(REPO_NAME)/compat: new dcahce flush found)
+ccflags-y += -DKSU_HAS_NEW_DCACHE_FLUSH
 endif
 
 # Checks Samsung
@@ -398,19 +443,6 @@ ifeq ($(CONFIG_KSU_MANUAL_HOOK), y)
     $(info -- You lost ksu_handle_sys_reboot hook in your kernel)
     $(info -- Read: https://resukisu.github.io/guide/manual-integrate.html)
     $(error You should integrate $(REPO_NAME) in your kernel.)
-  endif
-endif
-
-ifeq ($(CONFIG_KSU),y)
-  ifneq ($(KERNEL_TYPE), GKI 2.0)
-      ifeq ($(KSU_TP_HOOK), y)
-          $(info -- $(REPO_NAME) TP Hooks are only supported on GKI 2.0 kernels.)
-          $(info -- Current Kernel Type: $(KERNEL_TYPE))
-          $(info -- If you really want to continue, go to Kbuild and comment out this warning.)
-          $(info -- Usually, this error occurs because you forgot to enable some kernel configurations.)
-          $(info -- Read: https://resukisu.github.io/guide/manual-integrate.html)
-          $(error TP hooks are incompatible with Non-GKI/GKI 1.0 kernels in this configuration.)
-      endif
   endif
 endif
 
