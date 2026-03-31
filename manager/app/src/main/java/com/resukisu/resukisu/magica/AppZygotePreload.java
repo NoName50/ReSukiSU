@@ -13,20 +13,12 @@ import java.io.File;
 public class AppZygotePreload implements ZygotePreload {
     public static final String TAG = "KernelSUMagica";
 
-    private static native void forkDontCareAndExecKsud(String ksudPath, boolean isColorOS);
-
     @Override
     public void doPreload(@NonNull ApplicationInfo appInfo) {
         File f = new File(appInfo.nativeLibraryDir, "libksud.so");
         try {
-            System.loadLibrary("kernelsu");
-            boolean isColorOS = false;
-            try {
-                isColorOS = (int) (Class.forName("com.oplus.os.OplusBuild$VERSION").getField("SDK_VERSION").get(null)) != 0;
-                Log.d(TAG, "isColorOS: " + isColorOS);
-            } catch (Exception ignored) { }
             Log.d(TAG, "executing magica ...");
-            forkDontCareAndExecKsud(f.getAbsolutePath(), isColorOS);
+            Runtime.getRuntime().exec(new String[] { f.getAbsolutePath(), "late-load", "--magica", "5555" });
         } catch (Throwable t) {
             Log.e(TAG, "failed to late load", t);
         }

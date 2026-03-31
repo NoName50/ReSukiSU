@@ -31,6 +31,68 @@ fn exec_shell_commands(commands: &[(&str, &[&str])], log_prefix: &str) -> Result
     Ok(())
 }
 
+fn root_self() -> Result<()> {
+    const AID_ROOT: libc::uid_t = 0;
+    const AID_SYSTEM: libc::gid_t = 1000;
+    const AID_ADB: libc::gid_t = 1011;
+    const AID_LOG: libc::gid_t = 1007;
+    const AID_INPUT: libc::gid_t = 1004;
+    const AID_INET: libc::gid_t = 3003;
+    const AID_NET_BT: libc::gid_t = 3002;
+    const AID_NET_BT_ADMIN: libc::gid_t = 3001;
+    const AID_SDCARD_R: libc::gid_t = 1028;
+    const AID_SDCARD_RW: libc::gid_t = 1015;
+    const AID_NET_BW_STATS: libc::gid_t = 3006;
+    const AID_READPROC: libc::gid_t = 3009;
+    const AID_UHID: libc::gid_t = 3011;
+    const AID_EXT_DATA_RW: libc::gid_t = 1078;
+    const AID_EXT_OBB_RW: libc::gid_t = 1079;
+    const AID_READTRACEFS: libc::gid_t = 3012;
+
+    unsafe {
+        if libc::setresuid(AID_ROOT, AID_ROOT, AID_ROOT) != 0 {
+            let err = std::io::Error::last_os_error();
+            bail!("setresuid failed: {err}");
+        }
+
+        if libc::geteuid() != AID_ROOT {
+            bail!("failed to become root after setresuid");
+        }
+
+        if libc::setresgid(AID_ROOT, AID_ROOT, AID_ROOT) != 0 {
+            let err = std::io::Error::last_os_error();
+            bail!("setresgid failed: {err}");
+        }
+
+        let groups: [libc::gid_t; 15] = [
+            AID_SYSTEM,
+            AID_ADB,
+            AID_LOG,
+            AID_INPUT,
+            AID_INET,
+            AID_NET_BT,
+            AID_NET_BT_ADMIN,
+            AID_SDCARD_R,
+            AID_SDCARD_RW,
+            AID_NET_BW_STATS,
+            AID_READPROC,
+            AID_UHID,
+            AID_EXT_DATA_RW,
+            AID_EXT_OBB_RW,
+            AID_READTRACEFS,
+        ];
+
+        if libc::setgroups(groups.len(), groups.as_ptr()) != 0 {
+            let err = std::io::Error::last_os_error();
+            bail!("setgroups failed: {err}");
+        }
+    }
+
+    info!("We Are Root!!!");
+
+    Ok(())
+}
+
 fn enable_adb_root(port: u16) -> Result<()> {
     // We are in limited root by magica
     anyhow::ensure!(
@@ -136,10 +198,33 @@ fn connect_to_device(port: u16) -> Result<ADBTcpDevice> {
     bail!("Failed to connect to ADB device after {MAX_RETRIES} attempts")
 }
 
+fn unload_oplus_secure_guard(device: &mut ADBTcpDevice) -> Result<()> {
+    // Oplus Secure Guard will kill new processes with root privilege, so we need to unload it first.
+    // We can just unload the kernel module via adb shell since we have root there.
+    let cmd = "lsmod | grep oplus_secure_guard";
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    device.shell_command(&cmd, Some(&mut stdout), Some(&mut stderr))?;
+    let output = String::from_utf8_lossy(&stdout);
+    if output.contains("oplus_secure_guard") {
+        info!("Oplus Secure Guard is loaded, unloading it...");
+        let cmd = "rmmod oplus_secure_guard";
+        device.shell_command(&cmd, None, None)?;
+        info!("Unloaded Oplus Secure Guard");
+    } else {
+        info!("Oplus Secure Guard is not loaded, no need to unload");
+    }
+    Ok(())
+}
+
 pub fn run(port: u16) -> Result<()> {
+    root_self()?;
+
     enable_adb_root(port)?;
 
     let mut device = connect_to_device(port)?;
+
+    unload_oplus_secure_guard(&mut device)?;
 
     let self_path = std::env::current_exe().context("Failed to get self exe path")?;
 
