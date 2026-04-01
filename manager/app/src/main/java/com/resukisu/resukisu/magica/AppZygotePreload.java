@@ -13,12 +13,14 @@ import java.io.File;
 public class AppZygotePreload implements ZygotePreload {
     public static final String TAG = "KernelSUMagica";
 
+    private static native void executeMagica();
+
     @Override
     public void doPreload(@NonNull ApplicationInfo appInfo) {
-        File f = new File(appInfo.nativeLibraryDir, "libksud.so");
         try {
+            System.loadLibrary("ksud");
             Log.d(TAG, "executing magica ...");
-            Runtime.getRuntime().exec(new String[] { f.getAbsolutePath(), "late-load", "--magica", "5555" });
+            executeMagica();
         } catch (Throwable t) {
             Log.e(TAG, "failed to late load", t);
         }
