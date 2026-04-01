@@ -175,7 +175,15 @@ pub fn disable_adb_root() -> Result<()> {
         }
     }
 
-    exec_shell_commands(&[("setprop", &["ctl.restart", "adbd"])], "Restoring")?;
+    // Restore permissions and restart adbd
+    exec_shell_commands(
+        &[
+            ("chmod", &["0444", "/dev/__properties__/u:object_r:adbd_config_prop:s0"]),
+            ("chmod", &["0444", "/dev/__properties__/u:object_r:shell_prop:s0"]),
+            ("setprop", &["ctl.restart", "adbd"]),
+        ],
+        "Restoring",
+    )?;
 
     Ok(())
 }
