@@ -256,13 +256,3 @@ pub fn run(port: u16) -> Result<()> {
 
     Ok(())
 }
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_resukisu_resukisu_magica_AppZygotePreload_executeMagica(
-    _env: *mut libc::c_void,
-    _class: *mut libc::c_void,
-) {
-    if let Err(e) = run(5555) {
-        error!("Failed to execute magica: {e}");
-    }
-}

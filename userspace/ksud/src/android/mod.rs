@@ -7,7 +7,7 @@ mod init_event;
 mod kpm;
 mod ksucalls;
 mod late_load;
-mod magica;
+pub mod magica;
 mod module;
 mod profile;
 mod resetprop;
