@@ -1,3 +1,6 @@
+# DO NOT USE
+WIP: This fork added some jail break mode fixes for ColorOS, however it's **NOT** working now.
+
 # ReSukiSU
 <img align='right' src='ReSukiSU_blue.svg' width='220px' alt="ReSukiSU Icon">
 
